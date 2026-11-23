@@ -17,7 +17,18 @@ import (
 	"github.com/Jehudavd/gitwasp/internal/source"
 )
 
-const version = "v0.1.0-dev"
+var (
+	version = "v0.1.0-dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func formatVersion() string {
+	if commit == "none" && date == "unknown" {
+		return fmt.Sprintf("gitwasp %s", version)
+	}
+	return fmt.Sprintf("gitwasp %s (commit: %s, built: %s)", version, commit, date)
+}
 
 type cliDeps struct {
 	apiBaseURL  string
@@ -54,7 +65,7 @@ func runWithDeps(args []string, stdout, stderr io.Writer, deps cliDeps) int {
 		printUsage(stdout)
 		return 0
 	case "version", "-v", "--version":
-		fmt.Fprintf(stdout, "gitwasp %s\n", version)
+		fmt.Fprintln(stdout, formatVersion())
 		return 0
 	case "scan":
 		return runScan(args[1:], stdout, stderr, deps)
