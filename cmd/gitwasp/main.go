@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/Jehudavd/gitwasp/internal/gitclone"
 	"github.com/Jehudavd/gitwasp/internal/model"
 	"github.com/Jehudavd/gitwasp/internal/report"
 	"github.com/Jehudavd/gitwasp/internal/scanner"
@@ -15,11 +19,31 @@ import (
 
 const version = "v0.1.0-dev"
 
+type cliDeps struct {
+	apiBaseURL  string
+	httpClient  *http.Client
+	stdin       io.Reader
+	runClone    func(ctx context.Context, cloneURL, destDir string, stdout, stderr io.Writer) error
+	checkGitVer func(ctx context.Context) (string, string)
+}
+
+func defaultDeps() cliDeps {
+	return cliDeps{
+		stdin:       os.Stdin,
+		runClone:    gitclone.RunSafeClone,
+		checkGitVer: gitclone.CheckLocalGitVersion,
+	}
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	return runWithDeps(args, stdout, stderr, defaultDeps())
+}
+
+func runWithDeps(args []string, stdout, stderr io.Writer, deps cliDeps) int {
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 1
@@ -33,10 +57,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "gitwasp %s\n", version)
 		return 0
 	case "scan":
-		return runScan(args[1:], stdout, stderr)
+		return runScan(args[1:], stdout, stderr, deps)
 	case "clone":
-		fmt.Fprintln(stderr, "gitwasp: safe 'clone' wrapper is planned for Stage 2; run 'gitwasp scan <local-dir>' for v0.1")
-		return 1
+		return runCloneCmd(args[1:], stdout, stderr, deps)
 	default:
 		fmt.Fprintf(stderr, "gitwasp: unknown command %q\n\n", args[0])
 		printUsage(stderr)
@@ -44,17 +67,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func runScan(args []string, stdout, stderr io.Writer) int {
+var scanValueFlags = map[string]bool{
+	"ref":   true,
+	"token": true,
+}
+
+var cloneValueFlags = map[string]bool{
+	"ref":   true,
+	"token": true,
+}
+
+func runScan(args []string, stdout, stderr io.Writer, deps cliDeps) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	jsonOut := fs.Bool("json", false, "output scan result as JSON")
 	noColor := fs.Bool("no-color", false, "disable ANSI terminal colors")
+	refFlag := fs.String("ref", "", "branch, tag, or commit SHA for remote scans")
+	tokenFlag := fs.String("token", "", "GitHub token (defaults to GITHUB_TOKEN / GH_TOKEN)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: gitwasp scan [--json] [--no-color] <local-path>")
+		fmt.Fprintln(stderr, "Usage: gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | github-url | owner/repo>")
 	}
 
-	if err := fs.Parse(reorderScanFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(args, scanValueFlags)); err != nil {
 		return 1
 	}
 
@@ -64,18 +99,44 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 	}
 
 	target := fs.Arg(0)
-	if looksLikeRemoteTarget(target) {
-		fmt.Fprintf(stderr, "gitwasp: remote pre-clone scanning (%s) is planned for Stage 2; pass a local directory path for v0.1\n", target)
-		return 1
-	}
 
-	files, skipped, err := source.CollectLocal(target)
-	if err != nil {
-		fmt.Fprintf(stderr, "gitwasp: %v\n", err)
-		return 1
-	}
+	var (
+		res model.ScanResult
+	)
 
-	res := scanner.Scan(target, "local (zero-execution)", files, skipped)
+	if _, statErr := os.Stat(target); statErr == nil {
+		files, skipped, err := source.CollectLocal(target)
+		if err != nil {
+			fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+			return 1
+		}
+		res = scanner.Scan(target, "local (zero-execution)", files, skipped)
+	} else if source.LooksLikeRemoteTarget(target) {
+		repo, err := source.ParseGitHubTarget(target)
+		if err != nil {
+			fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+			return 1
+		}
+		files, skipped, resolvedRef, err := source.CollectGitHub(context.Background(), repo, source.GitHubOptions{
+			APIBaseURL: deps.apiBaseURL,
+			Token:      *tokenFlag,
+			Ref:        *refFlag,
+			HTTPClient: deps.httpClient,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+			return 1
+		}
+		mode := fmt.Sprintf("remote GitHub API (zero local write, ref: %s)", resolvedRef)
+		res = scanner.Scan(repo.CloneURL, mode, files, skipped)
+	} else {
+		files, skipped, err := source.CollectLocal(target)
+		if err != nil {
+			fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+			return 1
+		}
+		res = scanner.Scan(target, "local (zero-execution)", files, skipped)
+	}
 
 	if *jsonOut {
 		if err := report.WriteJSON(stdout, res); err != nil {
@@ -94,11 +155,115 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 	return model.ExitCode(res.Verdict)
 }
 
-func reorderScanFlags(args []string) []string {
+func runCloneCmd(args []string, stdout, stderr io.Writer, deps cliDeps) int {
+	fs := flag.NewFlagSet("clone", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	refFlag := fs.String("ref", "", "branch, tag, or commit SHA to scan before cloning")
+	yesFlag := fs.Bool("yes", false, "proceed automatically on WARN verdict without prompting")
+	forceFlag := fs.Bool("force", false, "proceed even on DANGER verdict (unsafe)")
+	noColor := fs.Bool("no-color", false, "disable ANSI terminal colors")
+	tokenFlag := fs.String("token", "", "GitHub token (defaults to GITHUB_TOKEN / GH_TOKEN)")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: gitwasp clone [--ref <ref>] [--yes] [--force] [--no-color] [--token <token>] <github-url | owner/repo> [dest-dir]")
+	}
+
+	if err := fs.Parse(reorderFlags(args, cloneValueFlags)); err != nil {
+		return 1
+	}
+
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		fs.Usage()
+		return 1
+	}
+
+	target := fs.Arg(0)
+	destDir := ""
+	if fs.NArg() == 2 {
+		destDir = fs.Arg(1)
+	}
+
+	repo, err := source.ParseGitHubTarget(target)
+	if err != nil {
+		fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+		return 1
+	}
+	if err := gitclone.ValidateCloneArgs(repo.CloneURL, destDir); err != nil {
+		fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+		return 1
+	}
+
+	ctx := context.Background()
+	if deps.checkGitVer != nil {
+		if _, warn := deps.checkGitVer(ctx); warn != "" {
+			fmt.Fprintln(stderr, warn)
+		}
+	}
+
+	files, skipped, resolvedRef, err := source.CollectGitHub(ctx, repo, source.GitHubOptions{
+		APIBaseURL: deps.apiBaseURL,
+		Token:      *tokenFlag,
+		Ref:        *refFlag,
+		HTTPClient: deps.httpClient,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+		return 1
+	}
+
+	mode := fmt.Sprintf("remote GitHub API (zero local write, ref: %s)", resolvedRef)
+	res := scanner.Scan(repo.CloneURL, mode, files, skipped)
+
+	useColor := !*noColor && os.Getenv("NO_COLOR") == "" && isInteractiveWriter(stdout)
+	if err := report.WriteTerminal(stdout, res, useColor); err != nil {
+		fmt.Fprintf(stderr, "gitwasp: writing report: %v\n", err)
+		return 1
+	}
+
+	switch res.Verdict {
+	case model.VerdictDanger:
+		if !*forceFlag {
+			fmt.Fprintln(stderr, "gitwasp: clone blocked due to DANGER verdict (re-run with --force to override)")
+			return model.ExitCode(model.VerdictDanger)
+		}
+		fmt.Fprintln(stderr, "gitwasp: warning: proceeding with clone due to --force despite DANGER findings")
+	case model.VerdictWarn:
+		if !*yesFlag && !*forceFlag {
+			fmt.Fprint(stderr, "Proceed with git clone despite warnings? [y/N]: ")
+			if !readConfirmation(deps.stdin) {
+				fmt.Fprintln(stderr, "gitwasp: clone aborted by user")
+				return 1
+			}
+		}
+	}
+
+	if err := deps.runClone(ctx, repo.CloneURL, destDir, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "gitwasp: git clone failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func readConfirmation(r io.Reader) bool {
+	if r == nil {
+		return false
+	}
+	reader := bufio.NewReader(r)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return false
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	return ans == "y" || ans == "yes"
+}
+
+func reorderFlags(args []string, valueFlags map[string]bool) []string {
 	var flags []string
 	var positional []string
 	stop := false
-	for _, a := range args {
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		if stop {
 			positional = append(positional, a)
 			continue
@@ -110,19 +275,18 @@ func reorderScanFlags(args []string) []string {
 		}
 		if strings.HasPrefix(a, "-") && len(a) > 1 {
 			flags = append(flags, a)
+			if !strings.Contains(a, "=") {
+				name := strings.TrimLeft(a, "-")
+				if valueFlags[name] && i+1 < len(args) {
+					i++
+					flags = append(flags, args[i])
+				}
+			}
 			continue
 		}
 		positional = append(positional, a)
 	}
 	return append(flags, positional...)
-}
-
-func looksLikeRemoteTarget(target string) bool {
-	lower := strings.ToLower(strings.TrimSpace(target))
-	return strings.HasPrefix(lower, "http://") ||
-		strings.HasPrefix(lower, "https://") ||
-		strings.HasPrefix(lower, "ssh://") ||
-		strings.HasPrefix(lower, "git@")
 }
 
 func isInteractiveWriter(w io.Writer) bool {
@@ -141,12 +305,13 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "gitwasp - Pre-clone & pre-open security inspector for untrusted Git repositories")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  gitwasp scan [--json] [--no-color] <local-path>")
+	fmt.Fprintln(w, "  gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | github-url | owner/repo>")
+	fmt.Fprintln(w, "  gitwasp clone [--ref <ref>] [--yes] [--force] [--no-color] [--token <token>] <github-url | owner/repo> [dest-dir]")
 	fmt.Fprintln(w, "  gitwasp version")
 	fmt.Fprintln(w, "  gitwasp help")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Exit Codes:")
 	fmt.Fprintln(w, "  0  SAFE   - No findings")
-	fmt.Fprintln(w, "  1  WARN   - Medium/Low findings or CLI error")
+	fmt.Fprintln(w, "  1  WARN   - Medium/Low findings, aborted clone, or CLI error")
 	fmt.Fprintln(w, "  2  DANGER - Critical/High findings detected")
 }

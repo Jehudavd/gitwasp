@@ -2,7 +2,7 @@
 
 **Pre-clone & pre-open security inspector for untrusted Git repositories.**
 
-`gitwasp` statically inspects repositories and downloaded project folders **without executing a single line of code** — catching IDE auto-execution traps, AI coding-agent hooks, malicious package lifecycle scripts, Git hook payloads, and hidden Unicode obfuscation before you click *"Trust Workspace"* or run `npm install`.
+`gitwasp` statically inspects remote GitHub repositories and local project folders **without executing a single line of code** — catching IDE auto-execution traps, AI coding-agent hooks, malicious package lifecycle scripts, Git hook payloads, and hidden Unicode obfuscation before you clone or click *"Trust Workspace"*.
 
 Built with **Go standard library only (zero external dependencies)** so the security tool itself has minimal supply-chain surface and is immune to ReDoS.
 
@@ -21,32 +21,67 @@ Developer-targeted attacks (such as fake take-home coding interviews and supply-
 
 ---
 
-## Quick Start (v0.1 — Local Pre-Open Audit)
+## Quick Start
 
-### Build & Run
+### Build
 
 ```bash
 go build -o gitwasp ./cmd/gitwasp
-./gitwasp scan ./path/to/untrusted-repo
 ```
 
-JSON output for automation / CI:
+### 1. Remote Pre-Clone Scan *(Zero Local Write)*
+
+Inspect a GitHub repository via the GitHub REST API before cloning a single byte to disk:
 
 ```bash
-./gitwasp scan --json ./path/to/untrusted-repo
+gitwasp scan https://github.com/owner/repo
+gitwasp scan owner/repo --ref main
+gitwasp scan --json https://github.com/owner/repo
 ```
+
+For private repositories or higher API rate limits, set `GITHUB_TOKEN` (or `GH_TOKEN`) or pass `--token`.
+
+### 2. Safe Clone Wrapper
+
+Drop-in wrapper around `git clone` that inspects the repository first, checks your local Git version for known clone RCEs, blocks automatically on `DANGER`, prompts on `WARN`, and clones with `git clone --no-local -- <url>` (without `--recurse-submodules`) when safe:
+
+```bash
+gitwasp clone https://github.com/owner/repo
+gitwasp clone owner/repo ./target-dir
+gitwasp clone --yes https://github.com/owner/repo
+```
+
+### 3. Local Pre-Open Scan
+
+Inspect an already-downloaded folder or extracted archive before opening it in VS Code / Cursor / Claude Code:
+
+```bash
+gitwasp scan ./path/to/untrusted-repo
+gitwasp scan --json ./path/to/untrusted-repo
+```
+
+### Flags
+
+| Flag | Commands | Description |
+| :--- | :--- | :--- |
+| `--json` | `scan` | Output machine-readable JSON |
+| `--no-color` | `scan`, `clone` | Disable ANSI terminal colors (also respects `NO_COLOR`) |
+| `--ref <ref>` | `scan`, `clone` | Branch, tag, or commit SHA for remote GitHub inspection |
+| `--token <token>` | `scan`, `clone` | GitHub API token (defaults to `GITHUB_TOKEN` / `GH_TOKEN`) |
+| `--yes` | `clone` | Proceed automatically on `WARN` without prompting |
+| `--force` | `clone` | Override `DANGER` block and clone anyway (unsafe) |
 
 ### Exit Codes
 
 | Code | Verdict | Meaning |
 | :--- | :--- | :--- |
 | `0` | `SAFE` | No findings detected |
-| `1` | `WARN` | Medium/Low findings detected (or CLI/input error) |
-| `2` | `DANGER` | Critical/High traps detected — do not trust or open |
+| `1` | `WARN` | Medium/Low findings detected, aborted clone, or CLI/input error |
+| `2` | `DANGER` | Critical/High traps detected — clone blocked, do not trust or open |
 
 ---
 
-## Detection Rules (v0.1)
+## Detection Rules
 
 | Rule ID | Target | What It Detects |
 | :--- | :--- | :--- |
@@ -78,8 +113,8 @@ go test -v ./...
 
 ---
 
-## Roadmap (Stage 2)
+## Roadmap (Stage 3 — Public Release Readiness)
 
-- **Remote Pre-Clone Inspection (`gitwasp scan https://github.com/owner/repo`)**: Inspect target files via GitHub REST API without writing a single byte to disk (supports private repos via `GITHUB_TOKEN`).
-- **Safe Clone Wrapper (`gitwasp clone <url>`)**: Runs pre-clone inspection first and halts automatically before invoking `git clone --no-local -- <url>` if `DANGER` findings are present.
-- **Release Automation**: Cross-platform static binaries via GoReleaser and GitHub Actions CI.
+- Open-source `LICENSE` and `CONTRIBUTING.md`
+- GitHub Actions CI (`go vet`, `go test`)
+- Cross-platform static binaries via GoReleaser (`v0.1.0`)

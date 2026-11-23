@@ -49,6 +49,102 @@ var vscodeTargets = map[string]bool{
 	"mcp.json":      true,
 }
 
+// IsSkippedPath reports whether relPath falls inside a directory that should
+// always be skipped (such as node_modules, vendor, build outputs, or .husky/_).
+func IsSkippedPath(relPath string) bool {
+	norm := path.Clean(filepath.ToSlash(relPath))
+	if norm == "." || norm == "" {
+		return false
+	}
+	lower := strings.ToLower(norm)
+	if lower == ".husky/_" || strings.HasSuffix(lower, "/.husky/_") || strings.Contains(lower, ".husky/_/") {
+		return true
+	}
+	for _, seg := range strings.Split(lower, "/") {
+		if skipDirs[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+// RemotePriority returns a fetch priority for remote pre-clone scanning (1 = highest,
+// 3 = lowest, 0 = do not fetch remotely). Keeping remote JS fetches limited to root or
+// scripts/hooks/bin directories avoids exhausting unauthenticated GitHub API rate limits.
+func RemotePriority(relPath string) int {
+	norm := path.Clean(filepath.ToSlash(relPath))
+	if norm == "." || norm == "" {
+		return 0
+	}
+	lower := strings.ToLower(norm)
+	base := path.Base(lower)
+	dir := path.Dir(lower)
+	ext := path.Ext(lower)
+
+	// Priority 1: IDE, AI harness, package config, and Git hook/submodule traps.
+	if (dir == ".vscode" || strings.HasSuffix(dir, "/.vscode")) && vscodeTargets[base] {
+		return 1
+	}
+	if (dir == ".claude" || strings.HasSuffix(dir, "/.claude")) &&
+		(base == "settings.json" || base == "settings.local.json") {
+		return 1
+	}
+	if base == ".mcp.json" {
+		return 1
+	}
+	if (dir == ".cursor" || strings.HasSuffix(dir, "/.cursor")) && base == "mcp.json" {
+		return 1
+	}
+	if base == "agents.md" || base == "claude.md" || base == ".cursorrules" {
+		return 1
+	}
+	if lower == ".github/copilot-instructions.md" || strings.HasSuffix(lower, "/.github/copilot-instructions.md") {
+		return 1
+	}
+	if strings.HasPrefix(lower, ".cursor/rules/") || strings.Contains(lower, "/.cursor/rules/") {
+		return 1
+	}
+	if base == "package.json" || base == ".npmrc" || base == ".envrc" || base == "setup.py" {
+		return 1
+	}
+	if base == ".gitmodules" {
+		return 1
+	}
+	if strings.HasPrefix(lower, ".githooks/") || strings.Contains(lower, "/.githooks/") {
+		return 1
+	}
+	if strings.HasPrefix(lower, ".husky/") || strings.Contains(lower, "/.husky/") {
+		if strings.Contains(lower, ".husky/_/") || base == "_" {
+			return 0
+		}
+		return 1
+	}
+
+	// Priority 2: Shell and batch scripts.
+	switch ext {
+	case ".sh", ".ps1", ".bat", ".cmd":
+		return 2
+	case ".js", ".mjs", ".cjs":
+		if dir == "." {
+			return 3
+		}
+		for _, seg := range strings.Split(dir, "/") {
+			switch seg {
+			case "scripts", "hooks", "bin", ".vscode", ".claude", ".githooks", ".husky":
+				return 3
+			}
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+// IsRemoteTargetFile reports whether relPath should be fetched during remote pre-clone scans.
+func IsRemoteTargetFile(relPath string) bool {
+	return !IsSkippedPath(relPath) && RemotePriority(relPath) > 0
+}
+
 // IsTargetFile reports whether relPath (slash-separated or OS-separated) should
 // be collected and inspected by the static security rules.
 func IsTargetFile(relPath string) bool {
