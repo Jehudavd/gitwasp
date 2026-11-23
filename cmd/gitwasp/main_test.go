@@ -212,3 +212,20 @@ func TestRunRemoteScanAndCloneFlows(t *testing.T) {
 		t.Fatalf("expected SAFE clone with git warning: code=%d cloneCalled=%v err=%s", code, cloneCalled, stderr.String())
 	}
 }
+
+func TestFormatVersion(t *testing.T) {
+	origVer, origCommit, origDate := version, commit, date
+	defer func() {
+		version, commit, date = origVer, origCommit, origDate
+	}()
+
+	version, commit, date = "v0.1.0-dev", "none", "unknown"
+	if got := formatVersion(); got != "gitwasp v0.1.0-dev" {
+		t.Fatalf("default formatVersion() = %q, want %q", got, "gitwasp v0.1.0-dev")
+	}
+
+	version, commit, date = "v0.1.0", "abc1234", "2026-11-23"
+	if got := formatVersion(); got != "gitwasp v0.1.0 (commit: abc1234, built: 2026-11-23)" {
+		t.Fatalf("injected formatVersion() = %q", got)
+	}
+}

