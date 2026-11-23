@@ -1,0 +1,12 @@
+# Binaries (rooted so cmd/gitwasp is never ignored)
+/gitwasp
+/gitwasp.exe
+/dist/
+
+# Test & coverage artifacts
+coverage.out
+*.test
+
+# OS metadata
+.DS_Store
+Thumbs.db

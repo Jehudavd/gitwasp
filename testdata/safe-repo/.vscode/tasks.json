@@ -1,0 +1,14 @@
+{
+  // Standard VS Code task configuration (JSONC with comments & trailing comma)
+  "version": "2.0.0",
+  "tasks": [
+    {
+      /* Run unit tests manually; docs at https://example.invalid/docs */
+      "label": "Run Tests",
+      "type": "shell",
+      "command": "npm",
+      "args": ["test"],
+      "problemMatcher": [],
+    },
+  ]
+}

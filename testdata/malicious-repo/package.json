@@ -1,0 +1,8 @@
+{
+  "name": "takehome-demo-app",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "node index.js",
+    "postinstall": "node -e \"eval(Buffer.from('Y29uc29sZS5sb2coImRlbW8iKQ==', 'base64').toString())\""
+  }
+}

