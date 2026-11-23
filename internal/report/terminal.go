@@ -28,7 +28,11 @@ func WriteTerminal(w io.Writer, res model.ScanResult, useColor bool) error {
 		return code + text + ansiReset
 	}
 
-	fmt.Fprintf(w, "\n%s\n", paint(ansiBold, "gitwasp · Pre-Open Workspace Security Audit"))
+	header := "gitwasp · Pre-Open Workspace Security Audit"
+	if strings.HasPrefix(res.Mode, "remote") {
+		header = "gitwasp · Pre-Clone Remote Repository Security Audit"
+	}
+	fmt.Fprintf(w, "\n%s\n", paint(ansiBold, header))
 	fmt.Fprintf(w, "%s %s\n", paint(ansiDim, "Target :"), res.Target)
 	fmt.Fprintf(w, "%s %s\n", paint(ansiDim, "Mode   :"), res.Mode)
 	fmt.Fprintf(w, "%s %d scanned, %d skipped\n\n", paint(ansiDim, "Files  :"), res.FilesScanned, res.FilesSkipped)
