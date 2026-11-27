@@ -49,6 +49,70 @@ var vscodeTargets = map[string]bool{
 	"mcp.json":      true,
 }
 
+var standardGitRootFiles = map[string]bool{
+	"config":              true,
+	"head":                true,
+	"fetch_head":          true,
+	"orig_head":           true,
+	"commit_editmsg":      true,
+	"merge_head":          true,
+	"merge_msg":           true,
+	"merge_mode":          true,
+	"merge_rr":            true,
+	"cherry_pick_head":    true,
+	"revert_head":         true,
+	"auto_merge":          true,
+	"index":               true,
+	"index.lock":          true,
+	"packed-refs":         true,
+	"description":         true,
+	"shallow":             true,
+	"gc.log":              true,
+	"config.worktree":     true,
+	"bisect_expected_rev": true,
+	"bisect_log":          true,
+	"bisect_names":        true,
+	"bisect_run":          true,
+	"bisect_start":        true,
+	"bisect_terms":        true,
+	"editmsg":             true,
+	"squash_msg":          true,
+	"tag_editmsg":         true,
+}
+
+// IsUnexpectedGitRootFile reports whether relPath is a non-standard file located
+// directly inside a .git/ directory (for example, a disguised .git/ltr script).
+func IsUnexpectedGitRootFile(relPath string) bool {
+	norm := path.Clean(filepath.ToSlash(relPath))
+	if norm == "." || norm == "" {
+		return false
+	}
+	lower := strings.ToLower(norm)
+	dir := path.Dir(lower)
+	if dir != ".git" && !strings.HasSuffix(dir, "/.git") {
+		return false
+	}
+	base := path.Base(lower)
+	return !standardGitRootFiles[base]
+}
+
+func isBuildConfigTS(base string) bool {
+	return strings.HasSuffix(base, ".config.ts") ||
+		strings.HasSuffix(base, ".config.mts") ||
+		strings.HasSuffix(base, ".config.cts")
+}
+
+func isSkippedGitSubdir(relLower string) bool {
+	segs := strings.Split(relLower, "/")
+	for i := 0; i < len(segs)-1; i++ {
+		if segs[i] == ".git" {
+			next := segs[i+1]
+			return next != "hooks" && next != "info"
+		}
+	}
+	return false
+}
+
 // IsSkippedPath reports whether relPath falls inside a directory that should
 // always be skipped (such as node_modules, vendor, build outputs, or .husky/_).
 func IsSkippedPath(relPath string) bool {
@@ -107,7 +171,7 @@ func RemotePriority(relPath string) int {
 	if base == "package.json" || base == ".npmrc" || base == ".envrc" || base == "setup.py" {
 		return 1
 	}
-	if base == ".gitmodules" {
+	if base == ".gitmodules" || base == ".gitattributes" {
 		return 1
 	}
 	if strings.HasPrefix(lower, ".githooks/") || strings.Contains(lower, "/.githooks/") {
@@ -136,6 +200,9 @@ func RemotePriority(relPath string) int {
 		}
 		return 0
 	default:
+		if isBuildConfigTS(base) && dir == "." {
+			return 3
+		}
 		return 0
 	}
 }
@@ -190,7 +257,12 @@ func IsTargetFile(relPath string) bool {
 	}
 
 	// Git configuration & hook files
-	if base == ".gitmodules" || lower == ".git/config" || strings.HasSuffix(lower, "/.git/config") {
+	if base == ".gitmodules" || base == ".gitattributes" ||
+		lower == ".git/config" || strings.HasSuffix(lower, "/.git/config") ||
+		lower == ".git/info/attributes" || strings.HasSuffix(lower, "/.git/info/attributes") {
+		return true
+	}
+	if IsUnexpectedGitRootFile(relPath) {
 		return true
 	}
 	if strings.HasPrefix(lower, ".git/hooks/") || strings.Contains(lower, "/.git/hooks/") {
@@ -206,8 +278,8 @@ func IsTargetFile(relPath string) bool {
 		return true
 	}
 
-	// Standalone script files
-	if scriptExts[path.Ext(lower)] {
+	// Standalone script files & TypeScript build configs
+	if scriptExts[path.Ext(lower)] || isBuildConfigTS(base) {
 		return true
 	}
 
@@ -271,7 +343,7 @@ func CollectLocal(root string) ([]model.FileEntry, int, error) {
 			if relLower == ".husky/_" || strings.HasSuffix(relLower, "/.husky/_") {
 				return filepath.SkipDir
 			}
-			if strings.HasPrefix(relLower, ".git/") && relLower != ".git/hooks" {
+			if isSkippedGitSubdir(relLower) {
 				return filepath.SkipDir
 			}
 			return nil

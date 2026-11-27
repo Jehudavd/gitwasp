@@ -4,9 +4,17 @@ import (
 	"bytes"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/Jehudavd/gitwasp/internal/model"
+)
+
+var (
+	reCryptoDecrypt      = regexp.MustCompile(`(?i)\b(?:createDecipheriv|createDecipher|subtle\.decrypt)\s*\(`)
+	reEthRPCCall         = regexp.MustCompile(`(?i)(?:['"]eth_call['"]|['"]eth_getStorageAt['"]|\beth_call\b|\beth_getStorageAt\b)`)
+	rePublicEVMRPC       = regexp.MustCompile(`(?i)(?:polygon-rpc\.com|rpc-mainnet\.matic|maticvigil\.com|polygon-bor-rpc|publicnode\.com/polygon|bsc-dataseed\d*\.(?:binance\.org|defibit\.io|ninicoin\.io)|ankr\.com/(?:polygon|bsc|eth)|1rpc\.io/(?:matic|bnb|eth)|drpc\.org)`)
+	reDynamicExecOrShell = regexp.MustCompile(`(?i)(?:\beval\s*\(|\bnew\s+Function\s*\(|\bchild_process\b|\bexecSync\s*\(|\bspawn\s*\()`)
 )
 
 var scriptExtensions = map[string]bool{
@@ -17,6 +25,9 @@ var scriptExtensions = map[string]bool{
 	".js":  true,
 	".mjs": true,
 	".cjs": true,
+	".ts":  true,
+	".mts": true,
+	".cts": true,
 }
 
 func checkObf(f model.FileEntry) []model.Finding {
@@ -30,6 +41,7 @@ func checkObf(f model.FileEntry) []model.Finding {
 	ext := strings.ToLower(path.Ext(f.Path))
 	if scriptExtensions[ext] {
 		findings = append(findings, checkScriptObfuscation(f)...)
+		findings = append(findings, checkEtherHiding(f)...)
 	}
 
 	return findings
@@ -235,5 +247,74 @@ func checkScriptObfuscation(f model.FileEntry) []model.Finding {
 			})
 		}
 	}
+
+	content := string(f.Content)
+	if reCryptoDecrypt.MatchString(content) && (reEvalCall.MatchString(content) || reNewFunc.MatchString(content)) {
+		lineNum := FindLineAny(f.Content, "createDecipheriv", "createDecipher", "subtle.decrypt")
+		snippet := ""
+		if lineNum > 0 && lineNum <= len(lines) {
+			snippet = SanitizeSnippet(lines[lineNum-1], 140)
+		}
+		findings = append(findings, model.Finding{
+			RuleID:   "OBF-003",
+			Title:    "Encrypted Payload Decrypt-and-Execute Loader",
+			Severity: model.SeverityCritical,
+			File:     f.Path,
+			Line:     lineNum,
+			Detail:   "Script decrypts encrypted payload and executes it dynamically",
+			Snippet:  snippet,
+		})
+	}
+
 	return findings
+}
+
+func checkEtherHiding(f model.FileEntry) []model.Finding {
+	content := string(f.Content)
+	hasEthCall := reEthRPCCall.MatchString(content)
+	hasDynExec := reDynamicExecOrShell.MatchString(content)
+
+	rpcMatches := rePublicEVMRPC.FindAllString(content, -1)
+	rpcSet := make(map[string]bool, len(rpcMatches))
+	for _, m := range rpcMatches {
+		rpcSet[strings.ToLower(m)] = true
+	}
+	rpcCount := len(rpcSet)
+
+	if !hasEthCall && rpcCount == 0 {
+		return nil
+	}
+
+	var sev model.Severity
+	var title, detail string
+	switch {
+	case (hasEthCall || rpcCount >= 1) && hasDynExec:
+		sev = model.SeverityCritical
+		title = "Potential EtherHiding Blockchain C2 Loader"
+		detail = fmt.Sprintf("Script combines EVM smart-contract RPC lookup (%d public RPC match(es), eth_call=%t) with dynamic code/process execution", rpcCount, hasEthCall)
+	case hasEthCall && rpcCount >= 2:
+		sev = model.SeverityHigh
+		title = "Multi-RPC Blockchain Smart Contract Query in Repo Script"
+		detail = fmt.Sprintf("Script queries eth_call/eth_getStorageAt across %d public EVM RPC endpoints", rpcCount)
+	default:
+		return nil
+	}
+
+	lineNum := FindLineAny(f.Content, "eth_call", "eth_getStorageAt", "polygon-rpc.com", "bsc-dataseed", "ankr.com", "1rpc.io", "drpc.org", "publicnode.com")
+	lines := splitLines(f.Content)
+	snippet := ""
+	if lineNum > 0 && lineNum <= len(lines) {
+		snippet = SanitizeSnippet(lines[lineNum-1], 140)
+	}
+
+	return []model.Finding{{
+		RuleID:    "OBF-004",
+		Title:     title,
+		Severity:  sev,
+		File:      f.Path,
+		Line:      lineNum,
+		Detail:    detail,
+		Snippet:   snippet,
+		Reference: "EtherHiding (Blockchain Smart Contract C2)",
+	}}
 }

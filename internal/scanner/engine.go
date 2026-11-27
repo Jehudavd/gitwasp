@@ -20,7 +20,14 @@ var allRules = []ruleFunc{
 // Scan runs all static security rules over collected files and returns a sorted,
 // deduplicated ScanResult without executing any code from the target.
 func Scan(target, mode string, files []model.FileEntry, skipped int) model.ScanResult {
-	raw := make([]model.Finding, 0)
+	return ScanWithExtraFindings(target, mode, files, skipped, nil)
+}
+
+// ScanWithExtraFindings runs all static security rules over collected files and
+// merges pre-computed metadata findings (for example archive-level hazards).
+func ScanWithExtraFindings(target, mode string, files []model.FileEntry, skipped int, extra []model.Finding) model.ScanResult {
+	raw := make([]model.Finding, 0, len(extra))
+	raw = append(raw, extra...)
 	for _, f := range files {
 		for _, rule := range allRules {
 			findings := rule(f)

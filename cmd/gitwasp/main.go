@@ -18,7 +18,7 @@ import (
 	"github.com/Jehudavd/gitwasp/internal/source"
 )
 
-const defaultDevVersion = "v0.1.1-dev"
+const defaultDevVersion = "v0.2.0-dev"
 
 var (
 	version = defaultDevVersion
@@ -108,7 +108,7 @@ func runScan(args []string, stdout, stderr io.Writer, deps cliDeps) int {
 	refFlag := fs.String("ref", "", "branch, tag, or commit SHA for remote scans")
 	tokenFlag := fs.String("token", "", "GitHub token (defaults to GITHUB_TOKEN / GH_TOKEN)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | github-url | owner/repo>")
+		fmt.Fprintln(stderr, "Usage: gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | archive.zip | github-url | owner/repo>")
 	}
 
 	if err := fs.Parse(reorderFlags(args, scanValueFlags)); err != nil {
@@ -126,13 +126,23 @@ func runScan(args []string, stdout, stderr io.Writer, deps cliDeps) int {
 		res model.ScanResult
 	)
 
-	if _, statErr := os.Stat(target); statErr == nil {
-		files, skipped, err := source.CollectLocal(target)
-		if err != nil {
-			fmt.Fprintf(stderr, "gitwasp: %v\n", err)
-			return 1
+	if info, statErr := os.Stat(target); statErr == nil {
+		if !info.IsDir() && source.IsZipFile(target) {
+			files, skipped, meta, err := source.CollectZip(target)
+			if err != nil {
+				fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+				return 1
+			}
+			extra := buildZipArchiveFindings(meta)
+			res = scanner.ScanWithExtraFindings(target, "zip archive (zero-extraction)", files, skipped, extra)
+		} else {
+			files, skipped, err := source.CollectLocal(target)
+			if err != nil {
+				fmt.Fprintf(stderr, "gitwasp: %v\n", err)
+				return 1
+			}
+			res = scanner.Scan(target, "local (zero-execution)", files, skipped)
 		}
-		res = scanner.Scan(target, "local (zero-execution)", files, skipped)
 	} else if source.LooksLikeRemoteTarget(target) {
 		repo, err := source.ParseGitHubTarget(target)
 		if err != nil {
@@ -323,11 +333,44 @@ func isInteractiveWriter(w io.Writer) bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+func buildZipArchiveFindings(meta source.ZipMeta) []model.Finding {
+	var extra []model.Finding
+	if meta.HasEmbeddedGit {
+		sample := ".git/"
+		if len(meta.EmbeddedGitPaths) > 0 {
+			sample = meta.EmbeddedGitPaths[0]
+		}
+		extra = append(extra, model.Finding{
+			RuleID:    "ARC-001",
+			Title:     "Archive Embeds Pre-Built .git Directory",
+			Severity:  model.SeverityCritical,
+			File:      sample,
+			Line:      0,
+			Detail:    "Archive contains an embedded .git/ directory (bypasses git clone safety protections and can auto-execute .git/config filters or hooks when opened in an IDE)",
+			Snippet:   strings.Join(meta.EmbeddedGitPaths, ", "),
+			Reference: "Trojanized .git archive vector (Contagious Interview)",
+		})
+	}
+	if meta.HasZipSlip {
+		sample := meta.ZipSlipPaths[0]
+		extra = append(extra, model.Finding{
+			RuleID:   "ARC-002",
+			Title:    "Path Traversal (Zip Slip) Entry in Archive",
+			Severity: model.SeverityCritical,
+			File:     sample,
+			Line:     0,
+			Detail:   "Archive entry path escapes extraction directory via traversal or absolute path",
+			Snippet:  strings.Join(meta.ZipSlipPaths, ", "),
+		})
+	}
+	return extra
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "gitwasp - Pre-clone & pre-open security inspector for untrusted Git repositories")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | github-url | owner/repo>")
+	fmt.Fprintln(w, "  gitwasp scan [--json] [--no-color] [--ref <ref>] [--token <token>] <local-path | archive.zip | github-url | owner/repo>")
 	fmt.Fprintln(w, "  gitwasp clone [--ref <ref>] [--yes] [--force] [--no-color] [--token <token>] <github-url | owner/repo> [dest-dir]")
 	fmt.Fprintln(w, "  gitwasp version")
 	fmt.Fprintln(w, "  gitwasp help")
