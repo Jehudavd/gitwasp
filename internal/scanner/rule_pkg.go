@@ -12,12 +12,20 @@ import (
 )
 
 var benignPackageScripts = map[string]bool{
-	"husky":           true,
-	"husky install":   true,
-	"prisma generate": true,
-	"patch-package":   true,
-	"svelte-kit sync": true,
-	"nuxt prepare":    true,
+	"husky":               true,
+	"husky install":       true,
+	"prisma generate":     true,
+	"patch-package":       true,
+	"svelte-kit sync":     true,
+	"nuxt prepare":        true,
+	"npx only-allow pnpm": true,
+	"npx only-allow npm":  true,
+	"npx only-allow yarn": true,
+	"npx only-allow bun":  true,
+	"only-allow pnpm":     true,
+	"only-allow npm":      true,
+	"only-allow yarn":     true,
+	"only-allow bun":      true,
 }
 
 var (

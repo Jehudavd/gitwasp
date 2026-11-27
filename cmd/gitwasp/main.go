@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/Jehudavd/gitwasp/internal/gitclone"
@@ -17,17 +18,27 @@ import (
 	"github.com/Jehudavd/gitwasp/internal/source"
 )
 
+const defaultDevVersion = "v0.1.1-dev"
+
 var (
-	version = "v0.1.0-dev"
+	version = defaultDevVersion
 	commit  = "none"
 	date    = "unknown"
 )
 
 func formatVersion() string {
-	if commit == "none" && date == "unknown" {
-		return fmt.Sprintf("gitwasp %s", version)
+	bi, _ := debug.ReadBuildInfo()
+	return formatVersionFrom(version, commit, date, bi)
+}
+
+func formatVersionFrom(ver, rev, built string, bi *debug.BuildInfo) string {
+	if ver == defaultDevVersion && bi != nil && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		ver = bi.Main.Version
 	}
-	return fmt.Sprintf("gitwasp %s (commit: %s, built: %s)", version, commit, date)
+	if rev == "none" && built == "unknown" {
+		return fmt.Sprintf("gitwasp %s", ver)
+	}
+	return fmt.Sprintf("gitwasp %s (commit: %s, built: %s)", ver, rev, built)
 }
 
 type cliDeps struct {
