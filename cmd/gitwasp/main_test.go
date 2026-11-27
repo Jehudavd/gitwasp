@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -214,18 +215,17 @@ func TestRunRemoteScanAndCloneFlows(t *testing.T) {
 }
 
 func TestFormatVersion(t *testing.T) {
-	origVer, origCommit, origDate := version, commit, date
-	defer func() {
-		version, commit, date = origVer, origCommit, origDate
-	}()
-
-	version, commit, date = "v0.1.0-dev", "none", "unknown"
-	if got := formatVersion(); got != "gitwasp v0.1.0-dev" {
-		t.Fatalf("default formatVersion() = %q, want %q", got, "gitwasp v0.1.0-dev")
+	wantDev := "gitwasp " + defaultDevVersion
+	if got := formatVersionFrom(defaultDevVersion, "none", "unknown", nil); got != wantDev {
+		t.Fatalf("nil BuildInfo formatVersionFrom() = %q, want %q", got, wantDev)
 	}
-
-	version, commit, date = "v0.1.0", "abc1234", "2026-11-23"
-	if got := formatVersion(); got != "gitwasp v0.1.0 (commit: abc1234, built: 2026-11-23)" {
-		t.Fatalf("injected formatVersion() = %q", got)
+	if got := formatVersionFrom(defaultDevVersion, "none", "unknown", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}); got != wantDev {
+		t.Fatalf("(devel) BuildInfo formatVersionFrom() = %q, want %q", got, wantDev)
+	}
+	if got := formatVersionFrom(defaultDevVersion, "none", "unknown", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.1"}}); got != "gitwasp v0.1.1" {
+		t.Fatalf("go install BuildInfo formatVersionFrom() = %q, want %q", got, "gitwasp v0.1.1")
+	}
+	if got := formatVersionFrom("v0.1.1", "abc1234", "2026-11-27", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0"}}); got != "gitwasp v0.1.1 (commit: abc1234, built: 2026-11-27)" {
+		t.Fatalf("ldflags formatVersionFrom() = %q", got)
 	}
 }

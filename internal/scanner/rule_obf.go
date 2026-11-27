@@ -48,6 +48,7 @@ func checkHiddenUnicode(f model.FileEntry) *model.Finding {
 	firstLineText := ""
 	hasBiDi := false
 	hasTag := false
+	onlyBOM := true
 
 	for i, line := range lines {
 		col := 0
@@ -58,6 +59,9 @@ func checkHiddenUnicode(f model.FileEntry) *model.Finding {
 				continue
 			}
 			total++
+			if r != 0xFEFF {
+				onlyBOM = false
+			}
 			if firstLine == 0 {
 				firstLine = i + 1
 				firstCol = col
@@ -89,6 +93,12 @@ func checkHiddenUnicode(f model.FileEntry) *model.Finding {
 		}
 	}
 
+	detail := fmt.Sprintf("Detected %d hidden %s character(s); first at line %d col %d", total, kind, firstLine, firstCol)
+	if !hasBiDi && !hasTag && onlyBOM && isTestFilePath(f.Path) {
+		sev = model.SeverityLow
+		detail = fmt.Sprintf("Detected %d UTF-8 BOM (U+FEFF) character(s) in test file (likely BOM-handling fixture); first at line %d col %d", total, firstLine, firstCol)
+	}
+
 	return &model.Finding{
 		RuleID:    "OBF-001",
 		Title:     "Hidden Unicode / Trojan Source Characters",
@@ -96,19 +106,42 @@ func checkHiddenUnicode(f model.FileEntry) *model.Finding {
 		File:      f.Path,
 		Line:      firstLine,
 		Column:    firstCol,
-		Detail:    fmt.Sprintf("Detected %d hidden %s character(s); first at line %d col %d", total, kind, firstLine, firstCol),
+		Detail:    detail,
 		Snippet:   SanitizeSnippet(firstLineText, 140),
 		Reference: "CVE-2021-42574 (Trojan Source) / GlassWorm",
 	}
 }
 
+func isTestFilePath(p string) bool {
+	lower := strings.ToLower(strings.ReplaceAll(p, `\`, `/`))
+	base := path.Base(lower)
+	if strings.Contains(base, "_test.") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+		return true
+	}
+	for _, seg := range []string{"/tests/", "/test/", "/__tests__/"} {
+		if strings.Contains(lower, seg) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"tests/", "test/", "__tests__/"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func checkHorizontalPadding(f model.FileEntry) []model.Finding {
 	lines := splitLines(f.Content)
+	isMarkdown := strings.EqualFold(path.Ext(f.Path), ".md")
 	var findings []model.Finding
 
 	for i, line := range lines {
 		runStart, runLen, tail := findLargeWhitespaceGap(line)
 		if runLen == 0 {
+			continue
+		}
+		if isMarkdown && isBenignMarkdownTablePadding(line, tail) {
 			continue
 		}
 		findings = append(findings, model.Finding{
@@ -123,6 +156,20 @@ func checkHorizontalPadding(f model.FileEntry) []model.Finding {
 		})
 	}
 	return findings
+}
+
+func isBenignMarkdownTablePadding(line, tail string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") || !strings.HasSuffix(trimmed, "|") {
+		return false
+	}
+	if suspicious, _ := SuspiciousCommandMatch(tail); suspicious {
+		return false
+	}
+	if reStrongInjection.MatchString(tail) || reWeakStealth.MatchString(tail) {
+		return false
+	}
+	return true
 }
 
 func findLargeWhitespaceGap(line string) (startCol int, gapLen int, tail string) {

@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	reStealthPhrase = regexp.MustCompile(`(?i)\b(?:ignore (?:all )?previous instructions|disregard (?:all )?previous|do not mention|don't mention|never mention|silently run|run silently|without asking|do not tell the user|before responding,?\s*(?:run|execute)|exfiltrate)\b`)
-	reExfilCue      = regexp.MustCompile(`(?i)\b(?:curl|wget|powershell|pwsh|bash|sh\s+-c|base64|id_rsa|\.ssh|\.aws|token|secret|api[_-]?key|env)\b|https?://|eval\s*\(`)
+	reStrongInjection = regexp.MustCompile(`(?i)\b(?:ignore (?:all )?previous instructions|disregard (?:all )?previous|silently run|run silently|without asking|do not tell the user|before responding,?\s*(?:run|execute)|exfiltrate)\b`)
+	reWeakStealth     = regexp.MustCompile(`(?i)\b(?:do not mention|don't mention|never mention)\b`)
+	reExfilCue        = regexp.MustCompile(`(?i)\b(?:curl|wget|powershell|pwsh|bash|sh\s+-c|base64|id_rsa|\.ssh|\.aws|token|secret|api[_-]?key|env)\b|https?://|eval\s*\(`)
+	reStrictExfilCue  = regexp.MustCompile(`(?i)\b(?:curl|wget|powershell|pwsh|sh\s+-c|base64|id_rsa|\.ssh|\.aws|secret|api[_-]?key|token|exfil(?:trate)?)\b|https?://|eval\s*\(`)
 )
 
 var shellExecutables = map[string]bool{
@@ -249,14 +251,14 @@ func checkMCPConfig(f model.FileEntry) []model.Finding {
 
 func checkPromptFile(f model.FileEntry) []model.Finding {
 	lines := splitLines(f.Content)
-	fullText := string(f.Content)
-
 	var findings []model.Finding
-	hasExfil := reExfilCue.MatchString(fullText)
 
 	for i, line := range lines {
 		lineNum := i + 1
-		if reStealthPhrase.MatchString(line) && (hasExfil || reExfilCue.MatchString(line)) {
+		window := nearbyLines(lines, i, 2)
+		isStrongMatch := reStrongInjection.MatchString(line) && reExfilCue.MatchString(window)
+		isWeakMatch := reWeakStealth.MatchString(line) && reStrictExfilCue.MatchString(window)
+		if isStrongMatch || isWeakMatch {
 			findings = append(findings, model.Finding{
 				RuleID:   "AI-004",
 				Title:    "Potential Prompt Injection in AI Instruction File",
@@ -283,4 +285,16 @@ func checkPromptFile(f model.FileEntry) []model.Finding {
 	}
 
 	return findings
+}
+
+func nearbyLines(lines []string, idx, radius int) string {
+	start := idx - radius
+	if start < 0 {
+		start = 0
+	}
+	end := idx + radius
+	if end >= len(lines) {
+		end = len(lines) - 1
+	}
+	return strings.Join(lines[start:end+1], "\n")
 }
