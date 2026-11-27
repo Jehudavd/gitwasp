@@ -1,6 +1,7 @@
 # gitwasp
 
 [![CI](https://github.com/Jehudavd/gitwasp/actions/workflows/ci.yml/badge.svg)](https://github.com/Jehudavd/gitwasp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Jehudavd/gitwasp)](https://github.com/Jehudavd/gitwasp/releases)
 ![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-brightgreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -47,6 +48,36 @@ Files  : 9 scanned, 0 skipped
 
 ----------------------------------------------------------------
 VERDICT: DANGER (8 Critical, 5 High, 0 Medium, 0 Low)
+```
+
+### Zero-Extraction ZIP Archive Scan (`v0.2.0+`)
+
+```text
+$ gitwasp scan ./coding-test.zip
+
+gitwasp · Pre-Extract Archive Security Audit
+Target : ./coding-test.zip
+Mode   : zip archive (zero-extraction)
+Files  : 5 scanned, 0 skipped
+
+[CRITICAL] ARC-001 · Archive Embeds Pre-Built .git Directory
+  File  : demo/.git/config
+  Detail: Archive contains an embedded .git/ directory (bypasses git clone safety protections and can auto-execute .git/config filters or hooks when opened in an IDE)
+
+[CRITICAL] GIT-003 · Git Filter Auto-Execution (filter.ltr.clean)
+  File  : demo/.git/config:4
+  Code  : clean = .git/ltr
+
+[CRITICAL] GIT-004 · Custom Git Filter in .git/info/attributes
+  File  : demo/.git/info/attributes:1
+  Code  : * filter=ltr
+
+[CRITICAL] OBF-004 · Potential EtherHiding Blockchain C2 Loader
+  File  : demo/scripts/c2.js:1
+  Ref   : EtherHiding (Blockchain Smart Contract C2)
+
+----------------------------------------------------------------
+VERDICT: DANGER (6 Critical, 1 High, 0 Medium, 0 Low)
 ```
 
 ---
