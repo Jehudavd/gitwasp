@@ -6,7 +6,7 @@
 ![Dependencies](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-brightgreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Pre-clone & pre-open security inspector for untrusted Git repositories.**
+**Pre-clone, pre-extract, and pre-open static security inspector for untrusted Git repos and ZIP archives.**
 
 `gitwasp` statically inspects remote GitHub repositories, downloaded `.zip` archives, and local project folders **without executing a single line of code or extracting archives to disk** — catching IDE auto-execution traps, trojanized `.git/` filters, AI coding-agent hooks, malicious package lifecycle scripts, EtherHiding loaders, and hidden Unicode obfuscation before you clone, unzip, or click *"Trust Workspace"*.
 
@@ -98,17 +98,30 @@ Developer-targeted attacks (such as fake take-home coding interviews and supply-
 
 ## Installation
 
-### Option 1: Install with Go
+### Option 1: Homebrew (macOS & Linux)
+
+```bash
+brew install --cask Jehudavd/tap/gitwasp
+```
+
+### Option 2: Scoop (Windows)
+
+```powershell
+scoop bucket add jehudavd https://github.com/Jehudavd/scoop-bucket
+scoop install jehudavd/gitwasp
+```
+
+### Option 3: Install with Go
 
 ```bash
 go install github.com/Jehudavd/gitwasp/cmd/gitwasp@latest
 ```
 
-### Option 2: Download Prebuilt Binary
+### Option 4: Download Prebuilt Binary
 
 Download the static binary for Linux, macOS, or Windows (`amd64` / `arm64`) from [GitHub Releases](https://github.com/Jehudavd/gitwasp/releases) and verify via `checksums.txt`.
 
-### Option 3: Build from Source
+### Option 5: Build from Source
 
 ```bash
 git clone https://github.com/Jehudavd/gitwasp.git

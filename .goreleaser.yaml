@@ -39,6 +39,37 @@ archives:
 checksum:
   name_template: checksums.txt
 
+homebrew_casks:
+  - name: gitwasp
+    ids:
+      - default
+    repository:
+      owner: Jehudavd
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/Jehudavd/gitwasp
+    description: Pre-clone, pre-extract, and pre-open static security inspector for untrusted Git repos and ZIP archives
+    license: MIT
+    skip_upload: "{{ if .Env.TAP_GITHUB_TOKEN }}auto{{ else }}true{{ end }}"
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+
+scoops:
+  - name: gitwasp
+    ids:
+      - default
+    repository:
+      owner: Jehudavd
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/Jehudavd/gitwasp
+    description: Pre-clone, pre-extract, and pre-open static security inspector for untrusted Git repos and ZIP archives
+    license: MIT
+    skip_upload: "{{ if .Env.TAP_GITHUB_TOKEN }}auto{{ else }}true{{ end }}"
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+
 changelog:
   sort: asc
   filters:
