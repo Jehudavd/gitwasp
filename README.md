@@ -7,7 +7,7 @@
 
 **Pre-clone & pre-open security inspector for untrusted Git repositories.**
 
-`gitwasp` statically inspects remote GitHub repositories and local project folders **without executing a single line of code** — catching IDE auto-execution traps, AI coding-agent hooks, malicious package lifecycle scripts, Git hook payloads, and hidden Unicode obfuscation before you clone or click *"Trust Workspace"*.
+`gitwasp` statically inspects remote GitHub repositories, downloaded `.zip` archives, and local project folders **without executing a single line of code or extracting archives to disk** — catching IDE auto-execution traps, trojanized `.git/` filters, AI coding-agent hooks, malicious package lifecycle scripts, EtherHiding loaders, and hidden Unicode obfuscation before you clone, unzip, or click *"Trust Workspace"*.
 
 ---
 
@@ -59,8 +59,9 @@ Developer-targeted attacks (such as fake take-home coding interviews and supply-
 - **`.claude/settings.json`** `SessionStart` hooks and `ANTHROPIC_BASE_URL` overrides (`CVE-2025-59536`, `CVE-2026-21852`)
 - **`.mcp.json` / `.cursor/mcp.json`** shell-invoking MCP servers and **`AGENTS.md` / `CLAUDE.md` / `.cursorrules`** indirect prompt injections
 - **`package.json`** `postinstall` / `preinstall` obfuscated scripts and rogue **`.npmrc`** registries
-- **`.githooks/*`**, **`.gitmodules`**, and **`.git/config`** (`core.fsmonitor`, `core.sshCommand`, `core.hooksPath`)
-- **Trojan Source** BiDi overrides, zero-width Unicode, horizontal whitespace scroll-hiding, and disguised asset execution
+- **`.githooks/*`**, **`.gitmodules`**, **`.git/info/attributes`**, and **`.git/config`** (`filter.*.clean/smudge`, `core.fsmonitor`, `core.sshCommand`, `core.hooksPath`, `diff.external`)
+- **Trojanized `.zip` archives** embedding pre-built `.git/` directories to bypass `git clone` safety boundaries
+- **Trojan Source** BiDi overrides, zero-width Unicode, horizontal whitespace scroll-hiding, AES-GCM encrypted `eval` loaders, and **EtherHiding** blockchain C2 scripts
 
 ---
 
@@ -110,9 +111,18 @@ gitwasp clone owner/repo ./target-dir
 gitwasp clone --yes https://github.com/owner/repo
 ```
 
-### 3. Local Pre-Open Scan
+### 3. Zero-Extraction ZIP Archive Scan *(Pre-Unzip)*
 
-Inspect an already-downloaded folder or extracted archive before opening it in VS Code / Cursor / Claude Code:
+Inspect a downloaded coding-test archive (`.zip`) directly in memory before extracting a single file — flagging embedded `.git/` directories, Zip Slip traversals, and payload traps:
+
+```bash
+gitwasp scan ./coding-test.zip
+gitwasp scan --json ./coding-test.zip
+```
+
+### 4. Local Pre-Open Scan
+
+Inspect an already-downloaded folder before opening it in VS Code / Cursor / Claude Code:
 
 ```bash
 gitwasp scan ./path/to/untrusted-repo
@@ -167,10 +177,14 @@ gitwasp scan --json ./path/to/untrusted-repo
 | `PKG-003` | `.envrc`, `setup.py` | Automatic direnv execution or `setup.py` system commands combined with network/obfuscation |
 | `GIT-001` | `.githooks/*`, `.husky/*`, `.git/hooks/*` | Malicious payloads, network calls, or payloads hidden behind >=40 decoy comment/blank lines |
 | `GIT-002` | `.gitmodules` | Dangerous `ext::`, `file://`, raw-IP, or `../` path-traversal submodule URLs |
-| `GIT-003` | `.git/config` | `core.fsmonitor`, `core.sshCommand`, or `core.hooksPath` overrides |
+| `GIT-003` | `.git/config` | `filter.*.clean/smudge/process`, `diff.external`, `core.fsmonitor`, `core.sshCommand`, `core.hooksPath`, `core.askPass`, `!` shell aliases, custom `credential.helper`, `[include]` |
+| `GIT-004` | `.git/info/attributes`, `.gitattributes`, `.git/*` | Custom `filter=`/`diff=` drivers and unexpected executable files placed inside `.git/` (e.g., `.git/ltr`) |
+| `ARC-001` | `.zip` archive entries | Archive embeds a pre-built `.git/` directory (bypasses `git clone` protections) |
+| `ARC-002` | `.zip` archive entries | Path traversal (`..` / absolute path / Zip Slip) entry inside archive |
 | `OBF-001` | All scanned target files | Trojan Source BiDi overrides, Unicode Tag characters, and hidden zero-width runes |
 | `OBF-002` | All scanned target files | Horizontal whitespace scroll-hiding (>=200 spaces or >=40 tabs before trailing code) |
-| `OBF-003` | `.sh`, `.ps1`, `.bat`, `.cmd`, `.js`, `.mjs`, `.cjs` | Disguised asset execution, `eval(Buffer.from(...,'base64'))`, or pipe-to-shell downloaders |
+| `OBF-003` | `.sh`, `.ps1`, `.bat`, `.cmd`, `.js`, `.mjs`, `.cjs`, `*.config.ts/mts/cts` | Disguised asset execution, `eval(Buffer.from(...,'base64'))`, encrypted `createDecipheriv` + `eval` loaders, pipe-to-shell downloaders |
+| `OBF-004` | `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts` | EtherHiding blockchain smart-contract C2 (`eth_call` / public Polygon/BSC/ETH RPC endpoints + dynamic execution or multi-RPC fallback) |
 
 ---
 

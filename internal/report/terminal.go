@@ -31,6 +31,8 @@ func WriteTerminal(w io.Writer, res model.ScanResult, useColor bool) error {
 	header := "gitwasp · Pre-Open Workspace Security Audit"
 	if strings.HasPrefix(res.Mode, "remote") {
 		header = "gitwasp · Pre-Clone Remote Repository Security Audit"
+	} else if strings.HasPrefix(res.Mode, "zip") {
+		header = "gitwasp · Pre-Extract Archive Security Audit"
 	}
 	fmt.Fprintf(w, "\n%s\n", paint(ansiBold, header))
 	fmt.Fprintf(w, "%s %s\n", paint(ansiDim, "Target :"), res.Target)
